@@ -22,9 +22,6 @@ export class CardView extends Component {
     @property({ type: SpriteFrame })
     public baseSpriteFrame: SpriteFrame | null = null;
 
-    @property({ type: Node })
-    public highlightNode: Node | null = null;
-
     @property
     public col = 12;
 
@@ -76,17 +73,11 @@ export class CardView extends Component {
 
     public setSelected(selected: boolean, immediate = false): void {
         this.selected = selected;
-        if (this.highlightNode) {
-            this.highlightNode.active = selected;
-        }
         this.applyPose(immediate);
     }
 
     public clearSelectedVisual(): void {
         this.selected = false;
-        if (this.highlightNode) {
-            this.highlightNode.active = false;
-        }
     }
 
     public setInteractable(interactable: boolean): void {

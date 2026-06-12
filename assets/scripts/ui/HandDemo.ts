@@ -116,31 +116,16 @@ export class HandDemo extends Component {
                 return;
             }
 
-            const cardNode = instantiate(this.cardPrefab) as Node;
-            const cardView = cardNode.getComponent(CardView);
-            if (!cardView) {
-                cardNode.destroy();
+            const position = new Vec3(this.startX + i * this.spacingX, this.cardY - 180, 0);
+            const handCard = this.createHandCard(card, position);
+            if (!handCard) {
                 continue;
             }
 
-            cardNode.setParent(this.node);
-            cardView.setup(card, this.onCardClicked.bind(this));
-
-            const handCard: HandCard = {
-                node: cardNode,
-                view: cardView,
-                card,
-                selected: false,
-            };
-            this.handCards.push(handCard);
-
-            const position = new Vec3(this.startX + i * this.spacingX, this.cardY - 180, 0);
-            cardNode.setPosition(position);
-            cardView.setBasePosition(position);
-            tween(cardNode)
+            tween(handCard.node)
                 .delay(i * 0.035)
                 .to(0.18, { position: new Vec3(this.startX + i * this.spacingX, this.cardY, 0) }, { easing: 'quadOut' })
-                .call(() => cardView.setBasePosition(new Vec3(this.startX + i * this.spacingX, this.cardY, 0)))
+                .call(() => handCard.view.setBasePosition(new Vec3(this.startX + i * this.spacingX, this.cardY, 0)))
                 .start();
         }
 
@@ -209,6 +194,88 @@ export class HandDemo extends Component {
         this.scheduleOnce(() => this.playSound('mult'), 0.34);
     }
 
+    private discardSelected(): void {
+        if (!this.acceptingInput) {
+            return;
+        }
+
+        const selected = this.getSelectedCards().sort((a, b) => a.node.position.x - b.node.position.x);
+        if (selected.length === 0 || selected.length > this.maxSelected) {
+            return;
+        }
+
+        this.acceptingInput = false;
+        this.setActionButtonsInteractable(false);
+        this.playSound('button');
+
+        for (let i = 0; i < selected.length; i += 1) {
+            const entry = selected[i];
+            entry.selected = false;
+            entry.view.clearSelectedVisual();
+            entry.view.setInteractable(false);
+
+            tween(entry.node)
+                .delay(i * 0.035)
+                .to(0.18, { position: new Vec3(entry.node.position.x, this.cardY - 220, 0) }, { easing: 'quadIn' })
+                .call(() => entry.node.destroy())
+                .start();
+        }
+
+        this.handCards = this.handCards.filter((entry) => !selected.includes(entry));
+        this.updateHandText(null);
+        this.reflowHand();
+
+        this.scheduleOnce(() => {
+            this.drawToHandSize();
+            this.reflowHand();
+            this.acceptingInput = true;
+            this.updateHandText(null);
+        }, 0.22 + Math.max(0, selected.length - 1) * 0.035);
+    }
+
+    private drawToHandSize(): void {
+        if (!this.cardPrefab) {
+            return;
+        }
+
+        while (this.handCards.length < this.handSize) {
+            const card = this.deck.pop();
+            if (!card) {
+                return;
+            }
+
+            this.createHandCard(card, new Vec3(this.startX + this.handCards.length * this.spacingX, this.cardY - 180, 0));
+        }
+    }
+
+    private createHandCard(card: PlayingCard, position: Vec3): HandCard | null {
+        if (!this.cardPrefab) {
+            return null;
+        }
+
+        const cardNode = instantiate(this.cardPrefab) as Node;
+        const cardView = cardNode.getComponent(CardView);
+        if (!cardView) {
+            cardNode.destroy();
+            return null;
+        }
+
+        cardNode.setParent(this.node);
+        cardNode.setPosition(position);
+        cardView.setup(card, this.onCardClicked.bind(this));
+        cardView.setBasePosition(position);
+
+        const handCard: HandCard = {
+            node: cardNode,
+            view: cardView,
+            card,
+            selected: false,
+        };
+        this.handCards.push(handCard);
+
+        return handCard;
+    }
+
     private reflowHand(): void {
         const startX = -((this.handCards.length - 1) * this.spacingX) / 2;
 
@@ -233,7 +300,7 @@ export class HandDemo extends Component {
             this.setLabel(this.chipsLabel, 'Chips 0');
             this.setLabel(this.multLabel, 'Mult 0');
             this.setLabel(this.totalLabel, 'Total 0');
-            this.setButtonInteractable(false);
+            this.setActionButtonsInteractable(false);
             return;
         }
 
@@ -241,12 +308,15 @@ export class HandDemo extends Component {
         this.setLabel(this.chipsLabel, `Chips ${score.chips}`);
         this.setLabel(this.multLabel, `Mult ${score.mult}`);
         this.setLabel(this.totalLabel, `Total ${score.total}`);
-        this.setButtonInteractable(this.getSelectedCards().length > 0 && this.getSelectedCards().length <= this.maxSelected);
+        this.setActionButtonsInteractable(this.getSelectedCards().length > 0 && this.getSelectedCards().length <= this.maxSelected);
     }
 
-    private setButtonInteractable(enabled: boolean): void {
+    private setActionButtonsInteractable(enabled: boolean): void {
         if (this.playButton) {
             this.playButton.interactable = enabled && this.acceptingInput;
+        }
+        if (this.discardButton) {
+            this.discardButton.interactable = enabled && this.acceptingInput;
         }
     }
 
@@ -256,7 +326,7 @@ export class HandDemo extends Component {
         }
 
         if (this.discardButton) {
-            this.discardButton.node.on(Button.EventType.CLICK, this.startRound, this);
+            this.discardButton.node.on(Button.EventType.CLICK, this.discardSelected, this);
         }
     }
 
