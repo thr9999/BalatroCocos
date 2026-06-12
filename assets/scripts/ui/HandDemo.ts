@@ -45,6 +45,12 @@ export class HandDemo extends Component {
     public maxSelected = 5;
 
     @property
+    public maxDiscards = 3;
+
+    @property
+    public maxHands = 4;
+
+    @property
     public playY = 220;
 
     @property
@@ -61,6 +67,12 @@ export class HandDemo extends Component {
 
     @property({ type: Label })
     public totalLabel: Label | null = null;
+
+    @property({ type: Label })
+    public discardsLabel: Label | null = null;
+
+    @property({ type: Label })
+    public handsLabel: Label | null = null;
 
     @property({ type: Button })
     public playButton: Button | null = null;
@@ -89,6 +101,8 @@ export class HandDemo extends Component {
     private deck: PlayingCard[] = [];
     private handCards: HandCard[] = [];
     private playedCards: HandCard[] = [];
+    private discardsLeft = 0;
+    private handsLeft = 0;
     private acceptingInput = true;
 
     protected start(): void {
@@ -99,9 +113,13 @@ export class HandDemo extends Component {
     private startRound(): void {
         this.clearCards();
         this.deck = shuffleDeck(createStandardDeck());
+        this.discardsLeft = this.maxDiscards;
+        this.handsLeft = this.maxHands;
         this.acceptingInput = false;
         this.dealHand();
         this.updateHandText(null);
+        this.updateDiscardsText();
+        this.updateHandsText();
     }
 
     private dealHand(): void {
@@ -164,9 +182,14 @@ export class HandDemo extends Component {
         if (selected.length === 0 || selected.length > this.maxSelected) {
             return;
         }
+        if (this.handsLeft <= 0) {
+            return;
+        }
 
         const score = this.evaluateSelection();
         this.acceptingInput = false;
+        this.handsLeft -= 1;
+        this.updateHandsText();
         this.playSound('button');
         selected.forEach((entry) => entry.view.setInteractable(false));
 
@@ -192,6 +215,13 @@ export class HandDemo extends Component {
 
         this.scheduleOnce(() => this.playSound('chips'), 0.16);
         this.scheduleOnce(() => this.playSound('mult'), 0.34);
+        this.scheduleOnce(() => {
+            this.clearPlayedCards();
+            this.drawToHandSize();
+            this.reflowHand();
+            this.acceptingInput = true;
+            this.updateHandText(null);
+        }, 0.5 + Math.max(0, selected.length - 1) * 0.04);
     }
 
     private discardSelected(): void {
@@ -203,8 +233,13 @@ export class HandDemo extends Component {
         if (selected.length === 0 || selected.length > this.maxSelected) {
             return;
         }
+        if (this.discardsLeft <= 0) {
+            return;
+        }
 
         this.acceptingInput = false;
+        this.discardsLeft -= 1;
+        this.updateDiscardsText();
         this.setActionButtonsInteractable(false);
         this.playSound('button');
 
@@ -313,10 +348,10 @@ export class HandDemo extends Component {
 
     private setActionButtonsInteractable(enabled: boolean): void {
         if (this.playButton) {
-            this.playButton.interactable = enabled && this.acceptingInput;
+            this.playButton.interactable = enabled && this.acceptingInput && this.handsLeft > 0;
         }
         if (this.discardButton) {
-            this.discardButton.interactable = enabled && this.acceptingInput;
+            this.discardButton.interactable = enabled && this.acceptingInput && this.discardsLeft > 0;
         }
     }
 
@@ -353,11 +388,26 @@ export class HandDemo extends Component {
         }
     }
 
+    private updateDiscardsText(): void {
+        this.setLabel(this.discardsLabel, `Discards ${this.discardsLeft}`);
+    }
+
+    private updateHandsText(): void {
+        this.setLabel(this.handsLabel, `Hands ${this.handsLeft}`);
+    }
+
     private clearCards(): void {
         for (const entry of this.handCards.concat(this.playedCards)) {
             entry.node.destroy();
         }
         this.handCards = [];
+        this.playedCards = [];
+    }
+
+    private clearPlayedCards(): void {
+        for (const entry of this.playedCards) {
+            entry.node.destroy();
+        }
         this.playedCards = [];
     }
 }
