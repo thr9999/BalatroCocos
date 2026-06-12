@@ -579,6 +579,9 @@
       "__uuid__": "a8086932-71d3-45a5-81f1-f0bbbf29ea46@f9941",
       "__expectedType__": "cc.SpriteFrame"
     },
+    "highlightNode": {
+      "__id__": 14
+    },
     "col": 12,
     "row": 3,
     "baseCol": 1,
