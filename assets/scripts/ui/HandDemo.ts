@@ -3,6 +3,7 @@ import {
     AudioClip,
     AudioSource,
     Button,
+    CCString,
     Component,
     instantiate,
     Label,
@@ -11,9 +12,20 @@ import {
     tween,
     Vec3,
 } from 'cc';
-import type { PlayingCard, PokerScore } from '../core/PokerHand';
+import type { PlayingCard } from '../core/PokerHand';
 import { RoundEngine } from '../core/RoundEngine';
 import type { PlayResult } from '../core/RoundEngine';
+import { getJokerDef } from '../core/Jokers';
+import type { JokerInstance } from '../core/JokerEffect';
+
+/** 出牌区 / 预览区都用这个最小形状显示，PokerScore 与 ScoreResult 都满足。 */
+type ScoreDisplay = {
+    name: string;
+    displayName: string;
+    chips: number;
+    mult: number;
+    total: number;
+};
 import { BLINDS, MAX_ANTE, getBlindTarget } from '../core/Blinds';
 import { CardView } from './CardView';
 
@@ -50,6 +62,9 @@ export class HandDemo extends Component {
 
     @property
     public maxHands = 4;
+
+    @property({ type: [CCString], tooltip: '调试用：填小丑牌 id（如 j_joker / j_duo）即在本局生效，正式版改由商店给牌' })
+    public debugJokerIds: string[] = [];
 
     @property
     public playY = 220;
@@ -132,6 +147,19 @@ export class HandDemo extends Component {
         this.startRound();
     }
 
+    private buildJokers(): JokerInstance[] {
+        const jokers: JokerInstance[] = [];
+        for (const id of this.debugJokerIds) {
+            const def = getJokerDef(id);
+            if (def) {
+                jokers.push({ def });
+            } else if (id) {
+                console.warn(`[HandDemo] 未知的小丑牌 id: ${id}`);
+            }
+        }
+        return jokers;
+    }
+
     private startRound(): void {
         this.clearCards();
         this.hideResultPanel();
@@ -142,6 +170,7 @@ export class HandDemo extends Component {
             discards: this.maxDiscards,
             handSize: this.handSize,
             maxSelected: this.maxSelected,
+            jokers: this.buildJokers(),
         });
 
         const dealt = this.engine.start();
@@ -384,7 +413,7 @@ export class HandDemo extends Component {
         }
     }
 
-    private updateHandText(score: PokerScore | null): void {
+    private updateHandText(score: ScoreDisplay | null): void {
         if (!score) {
             this.setLabel(this.handTypeLabel, '');
             this.setLabel(this.chipsLabel, 'Chips 0');

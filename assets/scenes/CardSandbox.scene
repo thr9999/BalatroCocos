@@ -641,6 +641,10 @@
     "maxSelected": 5,
     "maxDiscards": 3,
     "maxHands": 4,
+    "debugJokerIds": [
+      "j_joker",
+      "j_duo"
+    ],
     "playY": 220,
     "playSpacingX": 104,
     "handTypeLabel": {

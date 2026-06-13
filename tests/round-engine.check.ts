@@ -4,6 +4,9 @@ import { evaluatePokerHand } from '../assets/scripts/core/PokerHand';
 import type { PlayingCard } from '../assets/scripts/core/PokerHand';
 import { RoundEngine } from '../assets/scripts/core/RoundEngine';
 import { BLINDS, getBlindTarget } from '../assets/scripts/core/Blinds';
+import { scoreHand } from '../assets/scripts/core/ScoreEngine';
+import { getJokerDef } from '../assets/scripts/core/Jokers';
+import type { JokerInstance } from '../assets/scripts/core/JokerEffect';
 
 const assert = {
     ok(value: unknown, message?: string): void {
@@ -50,6 +53,52 @@ assert.strictEqual(getBlindTarget(1, 0), 300);
 assert.strictEqual(getBlindTarget(1, 1), 450);
 assert.strictEqual(getBlindTarget(1, 2), 600);
 assert.strictEqual(BLINDS.length, 3);
+
+// --- 小丑牌效果系统 ---
+const joker = (id: string): JokerInstance => ({ def: getJokerDef(id)! });
+const pairAA = [card('H_A'), card('S_A')]; // 对A：底分 chips 10+(11+11)=32, mult 2 → 64
+
+// 无小丑牌：基准
+const base = scoreHand(pairAA)!;
+assert.strictEqual(base.name, 'Pair');
+assert.strictEqual(base.chips, 32);
+assert.strictEqual(base.mult, 2);
+assert.strictEqual(base.total, 64);
+
+// 小丑：+4 mult → (32)*(2+4)=192
+assert.strictEqual(scoreHand(pairAA, [joker('j_joker')])!.total, 192);
+
+// 狡诈小丑：含对子 +50 chips → (82)*2=164
+assert.strictEqual(scoreHand(pairAA, [joker('j_sly')])!.total, 164);
+
+// 二重奏：含对子 ×2 mult → 32*4=128
+assert.strictEqual(scoreHand(pairAA, [joker('j_duo')])!.total, 128);
+
+// 半个小丑：出牌≤3张 +20 mult → 32*(2+20)=704
+assert.strictEqual(scoreHand(pairAA, [joker('j_half')])!.total, 704);
+
+// 贪婪小丑：每张计分方片 +3 mult。一对方片 → 32*(2+3+3)=256
+assert.strictEqual(scoreHand([card('D_A'), card('D_A')], [joker('j_greedy')])!.total, 256);
+// 非方片不触发：一对黑桃仍是基准 64
+assert.strictEqual(scoreHand([card('S_A'), card('S_A')], [joker('j_greedy')])!.total, 64);
+
+// 叠加顺序：先加后乘。小丑(+4)+二重奏(×2) → 32*((2+4)*2)=384
+assert.strictEqual(scoreHand(pairAA, [joker('j_joker'), joker('j_duo')])!.total, 384);
+
+// RoundEngine 接入小丑牌：play 走计分管线
+const jokerRound = new RoundEngine({
+    targetScore: 999999,
+    hands: 1,
+    discards: 0,
+    handSize: 8,
+    maxSelected: 5,
+    jokers: [joker('j_joker')],
+});
+jokerRound.start();
+jokerRound.toggleSelect(jokerRound.hand[0].code);
+const jokerPlay = jokerRound.play()!;
+// 单张高牌：底 chips=5+牌chips, mult=1, 小丑+4 → mult=5
+assert.strictEqual(jokerPlay.score.mult, 5);
 
 // --- 回合流程 ---
 const engine = new RoundEngine({ targetScore: 300, hands: 4, discards: 3, handSize: 8, maxSelected: 5 });

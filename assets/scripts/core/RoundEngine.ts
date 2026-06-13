@@ -1,5 +1,8 @@
 import { createStandardDeck, evaluatePokerHand, shuffleDeck } from './PokerHand';
 import type { PlayingCard, PokerScore } from './PokerHand';
+import { scoreHand } from './ScoreEngine';
+import type { ScoreResult } from './ScoreEngine';
+import type { JokerInstance } from './JokerEffect';
 
 export type RoundConfig = {
     targetScore: number;
@@ -7,6 +10,8 @@ export type RoundConfig = {
     discards: number;
     handSize: number;
     maxSelected: number;
+    /** 本局生效的小丑牌（来自 run 层；不传则按无小丑牌计分）。 */
+    jokers?: JokerInstance[];
 };
 
 export type RoundStatus = 'playing' | 'won' | 'lost';
@@ -14,7 +19,7 @@ export type RoundStatus = 'playing' | 'won' | 'lost';
 export type ToggleResult = 'selected' | 'deselected' | 'rejected';
 
 export type PlayResult = {
-    score: PokerScore;
+    score: ScoreResult;
     playedCards: PlayingCard[];
     drawnCards: PlayingCard[];
     roundScore: number;
@@ -39,9 +44,11 @@ export class RoundEngine {
     private remainingHands = 0;
     private remainingDiscards = 0;
     private roundStatus: RoundStatus = 'playing';
+    private jokers: JokerInstance[] = [];
 
     constructor(config: RoundConfig) {
         this.config = config;
+        this.jokers = config.jokers ?? [];
     }
 
     public start(): PlayingCard[] {
@@ -137,7 +144,7 @@ export class RoundEngine {
         }
 
         const playedCards = this.selectedCards;
-        const score = evaluatePokerHand(playedCards);
+        const score = scoreHand(playedCards, this.jokers);
         if (!score) {
             return null;
         }
