@@ -5,8 +5,11 @@ import type { PlayingCard } from '../assets/scripts/core/PokerHand';
 import { RoundEngine } from '../assets/scripts/core/RoundEngine';
 import { BLINDS, getBlindTarget } from '../assets/scripts/core/Blinds';
 import { scoreHand } from '../assets/scripts/core/ScoreEngine';
-import { getJokerDef } from '../assets/scripts/core/Jokers';
+import { getJokerDef, JOKER_DEFS } from '../assets/scripts/core/Jokers';
 import type { JokerInstance } from '../assets/scripts/core/JokerEffect';
+import { computeInterest, computeReward } from '../assets/scripts/core/Economy';
+import { RunState } from '../assets/scripts/core/RunState';
+import { ShopState } from '../assets/scripts/core/ShopState';
 
 const assert = {
     ok(value: unknown, message?: string): void {
@@ -147,4 +150,67 @@ assert.strictEqual(engine.canPlay, false);
 assert.strictEqual(engine.canDiscard, false);
 assert.strictEqual(engine.play(), null);
 
+// --- 经济：奖励结算 ---
+assert.strictEqual(computeInterest(0), 0);
+assert.strictEqual(computeInterest(4), 0);
+assert.strictEqual(computeInterest(12), 2); // floor(12/5)=2
+assert.strictEqual(computeInterest(100), 5); // 封顶
+// 小盲注(base 3) + 剩 2 次出牌 + 持有 $20 利息 4 = 9
+const reward = computeReward(BLINDS[0].reward, 2, 20);
+assert.strictEqual(reward.base, 3);
+assert.strictEqual(reward.hands, 2);
+assert.strictEqual(reward.interest, 4);
+assert.strictEqual(reward.total, 9);
+
+// --- RunState：金币 / 小丑牌槽 / 盲注推进 ---
+const run = new RunState({ startingMoney: 4, jokerSlots: 2 });
+assert.strictEqual(run.money, 4);
+assert.strictEqual(run.ante, 1);
+assert.strictEqual(run.blindIndex, 0);
+assert.strictEqual(run.currentTarget, 300);
+
+run.earn(10);
+assert.strictEqual(run.money, 14);
+assert.strictEqual(run.trySpend(20), false); // 钱不够
+assert.strictEqual(run.trySpend(6), true);
+assert.strictEqual(run.money, 8);
+
+assert.strictEqual(run.addJoker(getJokerDef('j_joker')!), true);
+assert.strictEqual(run.addJoker(getJokerDef('j_duo')!), true);
+assert.strictEqual(run.hasFreeJokerSlot, false);
+assert.strictEqual(run.addJoker(getJokerDef('j_sly')!), false); // 满槽
+assert.strictEqual(run.jokers.length, 2);
+
+run.advanceBlind();
+assert.strictEqual(run.blindIndex, 1); // 大盲注
+run.advanceBlind();
+assert.strictEqual(run.blindIndex, 2); // Boss
+run.advanceBlind();
+assert.strictEqual(run.ante, 2); // 进下一底注
+assert.strictEqual(run.blindIndex, 0);
+
+// --- ShopState：摆货 / 买 / 重摇（确定性 rng）---
+let seed = 0.1;
+const fakeRng = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
+const shop = new ShopState(JOKER_DEFS, { slots: 2, baseRerollCost: 5 }, fakeRng);
+shop.open();
+assert.strictEqual(shop.offers.length, 2);
+assert.strictEqual(shop.rerollCost, 5);
+assert.ok(shop.offers[0].cost > 0);
+
+// 模拟买第 0 个：RunState 扣款 + 标记售出
+const buyer = new RunState({ startingMoney: 100, jokerSlots: 5 });
+const offer0 = shop.offers[0];
+assert.strictEqual(buyer.trySpend(offer0.cost), true);
+assert.strictEqual(buyer.addJoker(offer0.def), true);
+shop.markSold(0);
+assert.strictEqual(shop.offers[0].sold, true);
+
+// 重摇换货、花费+1
+shop.reroll();
+assert.strictEqual(shop.rerollCost, 6);
+assert.strictEqual(shop.offers.length, 2);
+assert.strictEqual(shop.offers[0].sold, false);
+
 console.log(`OK — 回合结束：${engine.status}，得分 ${engine.roundScore} / ${engine.targetScore}`);
+console.log(`OK — 经济/商店：reward.total=${reward.total}, run.money=${run.money}, shop offers=${shop.offers.map((o) => o.def.id).join(',')}`);

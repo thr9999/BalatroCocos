@@ -15,8 +15,17 @@ import {
 import type { PlayingCard } from '../core/PokerHand';
 import { RoundEngine } from '../core/RoundEngine';
 import type { PlayResult } from '../core/RoundEngine';
-import { getJokerDef } from '../core/Jokers';
-import type { JokerInstance } from '../core/JokerEffect';
+import { getJokerDef, JOKER_DEFS } from '../core/Jokers';
+import { BLINDS } from '../core/Blinds';
+import { RunState } from '../core/RunState';
+import { ShopState } from '../core/ShopState';
+import { computeReward } from '../core/Economy';
+import type { RewardBreakdown } from '../core/Economy';
+import { CardView } from './CardView';
+import { JokerRow } from './JokerRow';
+import { ShopView } from './ShopView';
+
+const { ccclass, property } = _decorator;
 
 /** 出牌区 / 预览区都用这个最小形状显示，PokerScore 与 ScoreResult 都满足。 */
 type ScoreDisplay = {
@@ -26,10 +35,6 @@ type ScoreDisplay = {
     mult: number;
     total: number;
 };
-import { BLINDS, MAX_ANTE, getBlindTarget } from '../core/Blinds';
-import { CardView } from './CardView';
-
-const { ccclass, property } = _decorator;
 
 type HandCard = {
     node: Node;
@@ -63,8 +68,23 @@ export class HandDemo extends Component {
     @property
     public maxHands = 4;
 
-    @property({ type: [CCString], tooltip: '调试用：填小丑牌 id（如 j_joker / j_duo）即在本局生效，正式版改由商店给牌' })
+    @property
+    public startingMoney = 4;
+
+    @property({ tooltip: '小丑牌槽位数量' })
+    public jokerSlots = 5;
+
+    @property({ type: [CCString], tooltip: '调试用：开局白送的小丑牌 id（如 j_joker），正式玩法靠商店买' })
     public debugJokerIds: string[] = [];
+
+    @property({ type: JokerRow, tooltip: '桌面上那排小丑牌的容器（挂在 JokerArea 上），留空则只参与计分不显示' })
+    public jokerRow: JokerRow | null = null;
+
+    @property({ type: ShopView, tooltip: '商店面板（过盲注后弹出），留空则跳过商店直接进下一盲注' })
+    public shopView: ShopView | null = null;
+
+    @property({ type: Label, tooltip: 'HUD 金币显示' })
+    public moneyLabel: Label | null = null;
 
     @property
     public playY = 220;
@@ -136,41 +156,52 @@ export class HandDemo extends Component {
     public multSound: AudioClip | null = null;
 
     private engine: RoundEngine | null = null;
-    private ante = 1;
-    private blindIndex = 0;
+    private run: RunState | null = null;
+    private shop: ShopState | null = null;
     private handCards: HandCard[] = [];
     private playedCards: HandCard[] = [];
     private acceptingInput = false;
 
     protected start(): void {
         this.setupButtons();
-        this.startRound();
+        this.startRun();
     }
 
-    private buildJokers(): JokerInstance[] {
-        const jokers: JokerInstance[] = [];
+    /** 开新的一局：重置金币/小丑牌/底注，再开第一回合。 */
+    private startRun(): void {
+        this.run = new RunState({ startingMoney: this.startingMoney, jokerSlots: this.jokerSlots });
+        this.shop = new ShopState(JOKER_DEFS, { slots: 2, baseRerollCost: 5 });
+
         for (const id of this.debugJokerIds) {
             const def = getJokerDef(id);
             if (def) {
-                jokers.push({ def });
+                this.run.addJoker(def);
             } else if (id) {
                 console.warn(`[HandDemo] 未知的小丑牌 id: ${id}`);
             }
         }
-        return jokers;
+
+        this.shopView?.close();
+        this.startRound();
     }
 
     private startRound(): void {
         this.clearCards();
         this.hideResultPanel();
+        if (!this.run) {
+            return;
+        }
+
+        const jokers = this.run.jokers.slice();
+        this.jokerRow?.setJokers(jokers);
 
         this.engine = new RoundEngine({
-            targetScore: getBlindTarget(this.ante, this.blindIndex),
+            targetScore: this.run.currentTarget,
             hands: this.maxHands,
             discards: this.maxDiscards,
             handSize: this.handSize,
             maxSelected: this.maxSelected,
-            jokers: this.buildJokers(),
+            jokers,
         });
 
         const dealt = this.engine.start();
@@ -257,7 +288,7 @@ export class HandDemo extends Component {
                 return;
             }
 
-            this.showResultPanel(result);
+            this.onRoundEnd(result);
         }, 0.9 + Math.max(0, selected.length - 1) * 0.04);
     }
 
@@ -299,40 +330,65 @@ export class HandDemo extends Component {
         }, 0.22 + Math.max(0, selected.length - 1) * 0.035);
     }
 
-    private onResultButton(): void {
-        if (!this.engine) {
+    /** 回合结束（赢/输）的总处理：赢→结算金币→进商店；输或通关→结算面板。 */
+    private onRoundEnd(result: PlayResult): void {
+        if (!this.run) {
+            return;
+        }
+
+        if (result.status === 'lost') {
+            this.showResultPanel('lost', result, null);
+            return;
+        }
+
+        // 赢了：先按当前盲注结算金币（利息基于结算前的金币）
+        const reward = computeReward(BLINDS[this.run.blindIndex].reward, this.engine?.handsLeft ?? 0, this.run.money);
+        this.run.earn(reward.total);
+        this.updateMoney();
+
+        if (this.run.isFinalBlind) {
+            this.showResultPanel('won-run', result, reward);
+            return;
+        }
+
+        this.openShop(reward);
+    }
+
+    private openShop(reward: RewardBreakdown): void {
+        if (!this.run || !this.shop || !this.shopView) {
+            // 没接商店面板：跳过商店，直接进下一盲注
+            this.run?.advanceBlind();
+            this.startRound();
             return;
         }
 
         this.playSound('button');
-
-        if (this.engine.status === 'won') {
-            this.blindIndex += 1;
-            if (this.blindIndex >= BLINDS.length) {
-                this.blindIndex = 0;
-                this.ante += 1;
-            }
-            if (this.ante > MAX_ANTE) {
-                this.ante = 1;
-                this.blindIndex = 0;
-            }
-        } else {
-            this.ante = 1;
-            this.blindIndex = 0;
-        }
-
-        this.startRound();
+        this.shop.open();
+        this.shopView.open(this.run, this.shop, {
+            onChanged: () => {
+                this.jokerRow?.setJokers(this.run!.jokers.slice());
+                this.updateMoney();
+            },
+            onLeave: () => {
+                this.playSound('button');
+                this.run!.advanceBlind();
+                this.startRound();
+            },
+        });
+        void reward;
     }
 
-    private showResultPanel(result: PlayResult): void {
-        const runWon = result.status === 'won' && this.ante === MAX_ANTE && this.blindIndex === BLINDS.length - 1;
+    private onResultButton(): void {
+        this.playSound('button');
+        this.startRun();
+    }
+
+    private showResultPanel(kind: 'lost' | 'won-run', result: PlayResult, reward: RewardBreakdown | null): void {
         const title =
-            result.status === 'won'
-                ? runWon
-                    ? `通关！底注 ${this.ante} 全部击败`
-                    : `${BLINDS[this.blindIndex].name} 通过！`
+            kind === 'won-run'
+                ? `通关！全部底注击败${reward ? `（+$${reward.total}）` : ''}`
                 : `失败 ${result.roundScore} / ${this.engine?.targetScore ?? 0}`;
-        const buttonText = result.status === 'won' ? (runWon ? '新的一局' : '下一盲注') : '重新开始';
+        const buttonText = kind === 'won-run' ? '新的一局' : '重新开始';
 
         this.setLabel(this.resultTitleLabel, title);
         this.setLabel(this.resultButtonLabel, buttonText);
@@ -430,16 +486,23 @@ export class HandDemo extends Component {
     }
 
     private updateRoundText(): void {
-        if (!this.engine) {
+        if (!this.engine || !this.run) {
             return;
         }
 
-        const blind = BLINDS[this.blindIndex];
-        this.setLabel(this.blindLabel, `底注 ${this.ante} · ${blind.name}`);
+        const blind = BLINDS[this.run.blindIndex];
+        this.setLabel(this.blindLabel, `底注 ${this.run.ante} · ${blind.name}`);
         this.setLabel(this.targetLabel, `目标 ${this.engine.targetScore}`);
         this.setLabel(this.scoreLabel, `得分 ${this.engine.roundScore}`);
         this.setLabel(this.discardsLabel, `Discards ${this.engine.discardsLeft}`);
         this.setLabel(this.handsLabel, `Hands ${this.engine.handsLeft}`);
+        this.updateMoney();
+    }
+
+    private updateMoney(): void {
+        if (this.moneyLabel && this.run) {
+            this.moneyLabel.string = `$${this.run.money}`;
+        }
     }
 
     private refreshActionButtons(): void {
