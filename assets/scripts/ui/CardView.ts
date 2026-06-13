@@ -44,7 +44,6 @@ export class CardView extends Component {
 
     protected start(): void {
         this.refresh();
-        this.setSelected(this.selected, true);
         this.registerInput();
     }
 

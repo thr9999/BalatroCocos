@@ -11,8 +11,10 @@ import {
     tween,
     Vec3,
 } from 'cc';
-import { createStandardDeck, evaluatePokerHand, shuffleDeck } from '../core/PokerHand';
 import type { PlayingCard, PokerScore } from '../core/PokerHand';
+import { RoundEngine } from '../core/RoundEngine';
+import type { PlayResult } from '../core/RoundEngine';
+import { BLINDS, MAX_ANTE, getBlindTarget } from '../core/Blinds';
 import { CardView } from './CardView';
 
 const { ccclass, property } = _decorator;
@@ -21,7 +23,6 @@ type HandCard = {
     node: Node;
     view: CardView;
     card: PlayingCard;
-    selected: boolean;
 };
 
 @ccclass('HandDemo')
@@ -74,6 +75,27 @@ export class HandDemo extends Component {
     @property({ type: Label })
     public handsLabel: Label | null = null;
 
+    @property({ type: Label })
+    public blindLabel: Label | null = null;
+
+    @property({ type: Label })
+    public targetLabel: Label | null = null;
+
+    @property({ type: Label })
+    public scoreLabel: Label | null = null;
+
+    @property({ type: Node })
+    public resultPanel: Node | null = null;
+
+    @property({ type: Label })
+    public resultTitleLabel: Label | null = null;
+
+    @property({ type: Label })
+    public resultButtonLabel: Label | null = null;
+
+    @property({ type: Button })
+    public resultButton: Button | null = null;
+
     @property({ type: Button })
     public playButton: Button | null = null;
 
@@ -98,12 +120,12 @@ export class HandDemo extends Component {
     @property({ type: AudioClip })
     public multSound: AudioClip | null = null;
 
-    private deck: PlayingCard[] = [];
+    private engine: RoundEngine | null = null;
+    private ante = 1;
+    private blindIndex = 0;
     private handCards: HandCard[] = [];
     private playedCards: HandCard[] = [];
-    private discardsLeft = 0;
-    private handsLeft = 0;
-    private acceptingInput = true;
+    private acceptingInput = false;
 
     protected start(): void {
         this.setupButtons();
@@ -112,92 +134,70 @@ export class HandDemo extends Component {
 
     private startRound(): void {
         this.clearCards();
-        this.deck = shuffleDeck(createStandardDeck());
-        this.discardsLeft = this.maxDiscards;
-        this.handsLeft = this.maxHands;
+        this.hideResultPanel();
+
+        this.engine = new RoundEngine({
+            targetScore: getBlindTarget(this.ante, this.blindIndex),
+            hands: this.maxHands,
+            discards: this.maxDiscards,
+            handSize: this.handSize,
+            maxSelected: this.maxSelected,
+        });
+
+        const dealt = this.engine.start();
         this.acceptingInput = false;
-        this.dealHand();
+        this.spawnCards(dealt, true);
         this.updateHandText(null);
-        this.updateDiscardsText();
-        this.updateHandsText();
-    }
-
-    private dealHand(): void {
-        if (!this.cardPrefab) {
-            this.acceptingInput = true;
-            return;
-        }
-
-        for (let i = 0; i < this.handSize; i += 1) {
-            const card = this.deck.pop();
-            if (!card) {
-                return;
-            }
-
-            const position = new Vec3(this.startX + i * this.spacingX, this.cardY - 180, 0);
-            const handCard = this.createHandCard(card, position);
-            if (!handCard) {
-                continue;
-            }
-
-            tween(handCard.node)
-                .delay(i * 0.035)
-                .to(0.18, { position: new Vec3(this.startX + i * this.spacingX, this.cardY, 0) }, { easing: 'quadOut' })
-                .call(() => handCard.view.setBasePosition(new Vec3(this.startX + i * this.spacingX, this.cardY, 0)))
-                .start();
-        }
+        this.updateRoundText();
 
         this.playSound('select');
         this.scheduleOnce(() => {
             this.acceptingInput = true;
-        }, 0.18 + Math.max(0, this.handSize - 1) * 0.035);
+            this.updateHandText(null);
+        }, 0.18 + Math.max(0, dealt.length - 1) * 0.035);
     }
 
     private onCardClicked(cardView: CardView): void {
-        if (!this.acceptingInput || !cardView.card) {
+        if (!this.acceptingInput || !this.engine || !cardView.card) {
             return;
         }
 
-        const handCard = this.handCards.find((entry) => entry.view === cardView);
-        if (!handCard) {
+        const entry = this.handCards.find((handCard) => handCard.view === cardView);
+        if (!entry) {
             return;
         }
 
-        if (!handCard.selected && this.getSelectedCards().length >= this.maxSelected) {
+        const result = this.engine.toggleSelect(entry.card.code);
+        if (result === 'rejected') {
             return;
         }
 
-        handCard.selected = !handCard.selected;
-        handCard.view.setSelected(handCard.selected);
-        this.playSound(handCard.selected ? 'select' : 'deselect');
-        this.updateHandText(this.evaluateSelection());
+        const selected = result === 'selected';
+        entry.view.setSelected(selected);
+        this.playSound(selected ? 'select' : 'deselect');
+        this.updateHandText(this.engine.previewScore());
     }
 
     private playSelected(): void {
-        if (!this.acceptingInput) {
+        if (!this.acceptingInput || !this.engine || !this.engine.canPlay) {
             return;
         }
 
-        const selected = this.getSelectedCards().sort((a, b) => a.node.position.x - b.node.position.x);
-        if (selected.length === 0 || selected.length > this.maxSelected) {
-            return;
-        }
-        if (this.handsLeft <= 0) {
+        const selected = this.takeEntries(this.engine.selectedCards);
+        const result = this.engine.play();
+        if (!result) {
             return;
         }
 
-        const score = this.evaluateSelection();
         this.acceptingInput = false;
-        this.handsLeft -= 1;
-        this.updateHandsText();
+        this.playedCards = selected;
         this.playSound('button');
-        selected.forEach((entry) => entry.view.setInteractable(false));
 
         const startX = -((selected.length - 1) * this.playSpacingX) / 2;
         for (let i = 0; i < selected.length; i += 1) {
             const entry = selected[i];
-            entry.selected = false;
             entry.view.clearSelectedVisual();
+            entry.view.setInteractable(false);
             entry.view.juice();
 
             const target = new Vec3(startX + i * this.playSpacingX, this.playY, 0);
@@ -208,44 +208,47 @@ export class HandDemo extends Component {
                 .start();
         }
 
-        this.handCards = this.handCards.filter((entry) => !selected.includes(entry));
-        this.playedCards = selected;
         this.reflowHand();
-        this.updateHandText(score);
+        this.updateHandText(result.score);
 
         this.scheduleOnce(() => this.playSound('chips'), 0.16);
-        this.scheduleOnce(() => this.playSound('mult'), 0.34);
+        this.scheduleOnce(() => {
+            this.playSound('mult');
+            this.updateRoundText();
+        }, 0.34);
+
         this.scheduleOnce(() => {
             this.clearPlayedCards();
-            this.drawToHandSize();
-            this.reflowHand();
-            this.acceptingInput = true;
-            this.updateHandText(null);
-        }, 0.5 + Math.max(0, selected.length - 1) * 0.04);
+
+            if (result.status === 'playing') {
+                this.spawnCards(result.drawnCards, false);
+                this.reflowHand();
+                this.acceptingInput = true;
+                this.updateHandText(null);
+                return;
+            }
+
+            this.showResultPanel(result);
+        }, 0.9 + Math.max(0, selected.length - 1) * 0.04);
     }
 
     private discardSelected(): void {
-        if (!this.acceptingInput) {
+        if (!this.acceptingInput || !this.engine || !this.engine.canDiscard) {
             return;
         }
 
-        const selected = this.getSelectedCards().sort((a, b) => a.node.position.x - b.node.position.x);
-        if (selected.length === 0 || selected.length > this.maxSelected) {
-            return;
-        }
-        if (this.discardsLeft <= 0) {
+        const selected = this.takeEntries(this.engine.selectedCards);
+        const result = this.engine.discard();
+        if (!result) {
             return;
         }
 
         this.acceptingInput = false;
-        this.discardsLeft -= 1;
-        this.updateDiscardsText();
-        this.setActionButtonsInteractable(false);
         this.playSound('button');
+        this.updateRoundText();
 
         for (let i = 0; i < selected.length; i += 1) {
             const entry = selected[i];
-            entry.selected = false;
             entry.view.clearSelectedVisual();
             entry.view.setInteractable(false);
 
@@ -256,30 +259,87 @@ export class HandDemo extends Component {
                 .start();
         }
 
-        this.handCards = this.handCards.filter((entry) => !selected.includes(entry));
         this.updateHandText(null);
         this.reflowHand();
 
         this.scheduleOnce(() => {
-            this.drawToHandSize();
+            this.spawnCards(result.drawnCards, false);
             this.reflowHand();
             this.acceptingInput = true;
             this.updateHandText(null);
         }, 0.22 + Math.max(0, selected.length - 1) * 0.035);
     }
 
-    private drawToHandSize(): void {
+    private onResultButton(): void {
+        if (!this.engine) {
+            return;
+        }
+
+        this.playSound('button');
+
+        if (this.engine.status === 'won') {
+            this.blindIndex += 1;
+            if (this.blindIndex >= BLINDS.length) {
+                this.blindIndex = 0;
+                this.ante += 1;
+            }
+            if (this.ante > MAX_ANTE) {
+                this.ante = 1;
+                this.blindIndex = 0;
+            }
+        } else {
+            this.ante = 1;
+            this.blindIndex = 0;
+        }
+
+        this.startRound();
+    }
+
+    private showResultPanel(result: PlayResult): void {
+        const runWon = result.status === 'won' && this.ante === MAX_ANTE && this.blindIndex === BLINDS.length - 1;
+        const title =
+            result.status === 'won'
+                ? runWon
+                    ? `通关！底注 ${this.ante} 全部击败`
+                    : `${BLINDS[this.blindIndex].name} 通过！`
+                : `失败 ${result.roundScore} / ${this.engine?.targetScore ?? 0}`;
+        const buttonText = result.status === 'won' ? (runWon ? '新的一局' : '下一盲注') : '重新开始';
+
+        this.setLabel(this.resultTitleLabel, title);
+        this.setLabel(this.resultButtonLabel, buttonText);
+        if (this.resultPanel) {
+            this.resultPanel.active = true;
+        }
+    }
+
+    private hideResultPanel(): void {
+        if (this.resultPanel) {
+            this.resultPanel.active = false;
+        }
+    }
+
+    private spawnCards(cards: PlayingCard[], isInitialDeal: boolean): void {
         if (!this.cardPrefab) {
             return;
         }
 
-        while (this.handCards.length < this.handSize) {
-            const card = this.deck.pop();
-            if (!card) {
-                return;
+        const existing = this.handCards.length;
+        for (let i = 0; i < cards.length; i += 1) {
+            const slot = existing + i;
+            const from = new Vec3(this.startX + slot * this.spacingX, this.cardY - 180, 0);
+            const entry = this.createHandCard(cards[i], from);
+            if (!entry) {
+                continue;
             }
 
-            this.createHandCard(card, new Vec3(this.startX + this.handCards.length * this.spacingX, this.cardY - 180, 0));
+            if (isInitialDeal) {
+                const target = new Vec3(this.startX + slot * this.spacingX, this.cardY, 0);
+                tween(entry.node)
+                    .delay(slot * 0.035)
+                    .to(0.18, { position: target }, { easing: 'quadOut' })
+                    .call(() => entry.view.setBasePosition(target))
+                    .start();
+            }
         }
     }
 
@@ -300,15 +360,19 @@ export class HandDemo extends Component {
         cardView.setup(card, this.onCardClicked.bind(this));
         cardView.setBasePosition(position);
 
-        const handCard: HandCard = {
-            node: cardNode,
-            view: cardView,
-            card,
-            selected: false,
-        };
-        this.handCards.push(handCard);
+        const entry: HandCard = { node: cardNode, view: cardView, card };
+        this.handCards.push(entry);
 
-        return handCard;
+        return entry;
+    }
+
+    private takeEntries(cards: PlayingCard[]): HandCard[] {
+        const codes = new Set(cards.map((card) => card.code));
+        const taken = this.handCards
+            .filter((entry) => codes.has(entry.card.code))
+            .sort((a, b) => a.node.position.x - b.node.position.x);
+        this.handCards = this.handCards.filter((entry) => !codes.has(entry.card.code));
+        return taken;
     }
 
     private reflowHand(): void {
@@ -320,38 +384,41 @@ export class HandDemo extends Component {
         }
     }
 
-    private evaluateSelection(): PokerScore | null {
-        const selectedCards = this.getSelectedCards().map((entry) => entry.card);
-        return evaluatePokerHand(selectedCards);
-    }
-
-    private getSelectedCards(): HandCard[] {
-        return this.handCards.filter((entry) => entry.selected);
-    }
-
     private updateHandText(score: PokerScore | null): void {
         if (!score) {
             this.setLabel(this.handTypeLabel, '');
             this.setLabel(this.chipsLabel, 'Chips 0');
             this.setLabel(this.multLabel, 'Mult 0');
             this.setLabel(this.totalLabel, 'Total 0');
-            this.setActionButtonsInteractable(false);
+        } else {
+            this.setLabel(this.handTypeLabel, `${score.displayName} / ${score.name}`);
+            this.setLabel(this.chipsLabel, `Chips ${score.chips}`);
+            this.setLabel(this.multLabel, `Mult ${score.mult}`);
+            this.setLabel(this.totalLabel, `Total ${score.total}`);
+        }
+
+        this.refreshActionButtons();
+    }
+
+    private updateRoundText(): void {
+        if (!this.engine) {
             return;
         }
 
-        this.setLabel(this.handTypeLabel, `${score.displayName} / ${score.name}`);
-        this.setLabel(this.chipsLabel, `Chips ${score.chips}`);
-        this.setLabel(this.multLabel, `Mult ${score.mult}`);
-        this.setLabel(this.totalLabel, `Total ${score.total}`);
-        this.setActionButtonsInteractable(this.getSelectedCards().length > 0 && this.getSelectedCards().length <= this.maxSelected);
+        const blind = BLINDS[this.blindIndex];
+        this.setLabel(this.blindLabel, `底注 ${this.ante} · ${blind.name}`);
+        this.setLabel(this.targetLabel, `目标 ${this.engine.targetScore}`);
+        this.setLabel(this.scoreLabel, `得分 ${this.engine.roundScore}`);
+        this.setLabel(this.discardsLabel, `Discards ${this.engine.discardsLeft}`);
+        this.setLabel(this.handsLabel, `Hands ${this.engine.handsLeft}`);
     }
 
-    private setActionButtonsInteractable(enabled: boolean): void {
+    private refreshActionButtons(): void {
         if (this.playButton) {
-            this.playButton.interactable = enabled && this.acceptingInput && this.handsLeft > 0;
+            this.playButton.interactable = this.acceptingInput && !!this.engine?.canPlay;
         }
         if (this.discardButton) {
-            this.discardButton.interactable = enabled && this.acceptingInput && this.discardsLeft > 0;
+            this.discardButton.interactable = this.acceptingInput && !!this.engine?.canDiscard;
         }
     }
 
@@ -362,6 +429,10 @@ export class HandDemo extends Component {
 
         if (this.discardButton) {
             this.discardButton.node.on(Button.EventType.CLICK, this.discardSelected, this);
+        }
+
+        if (this.resultButton) {
+            this.resultButton.node.on(Button.EventType.CLICK, this.onResultButton, this);
         }
     }
 
@@ -386,14 +457,6 @@ export class HandDemo extends Component {
         if (label) {
             label.string = text;
         }
-    }
-
-    private updateDiscardsText(): void {
-        this.setLabel(this.discardsLabel, `Discards ${this.discardsLeft}`);
-    }
-
-    private updateHandsText(): void {
-        this.setLabel(this.handsLabel, `Hands ${this.handsLeft}`);
     }
 
     private clearCards(): void {
