@@ -1,8 +1,10 @@
-import { _decorator, Component, Node, Rect, Size, Sprite, SpriteFrame, Tween, tween, Vec2, Vec3 } from 'cc';
+import { _decorator, Component, Node, Rect, Size, Sprite, SpriteFrame, Tween, tween, UITransform, Vec2, Vec3 } from 'cc';
 import type { PlayingCard } from '../core/PokerHand';
+import { ResponsiveRoot } from './ResponsiveRoot';
 
 const { ccclass, property } = _decorator;
 
+// 图集单元格尺寸（切片用的源像素），与显示尺寸是两回事
 const CARD_WIDTH = 142;
 const CARD_HEIGHT = 190;
 const SELECTED_Y = 34;
@@ -21,6 +23,12 @@ export class CardView extends Component {
 
     @property({ type: SpriteFrame })
     public baseSpriteFrame: SpriteFrame | null = null;
+
+    @property({ tooltip: '卡牌宽（tile，× 基础单位 = 像素）' })
+    public widthTiles = 2;
+
+    @property({ tooltip: '卡牌高（tile）' })
+    public heightTiles = 2.75;
 
     @property
     public col = 12;
@@ -43,8 +51,26 @@ export class CardView extends Component {
     private clickHandler: ((cardView: CardView) => void) | null = null;
 
     protected start(): void {
+        this.applyDisplaySize();
         this.refresh();
         this.registerInput();
+    }
+
+    /** 卡牌显示尺寸 = 本组件的 tile 宽高 × 基础单位（图集仍按源像素切片，这里只定显示大小）。 */
+    private applyDisplaySize(): void {
+        const unit = ResponsiveRoot.current?.unit ?? ResponsiveRoot.DEFAULT_UNIT;
+        const w = this.widthTiles * unit;
+        const h = this.heightTiles * unit;
+        const setSize = (sprite: Sprite | null) => {
+            if (!sprite) {
+                return;
+            }
+            sprite.sizeMode = Sprite.SizeMode.CUSTOM;
+            sprite.getComponent(UITransform)?.setContentSize(w, h);
+        };
+        setSize(this.baseSprite);
+        setSize(this.frontSprite);
+        this.getComponent(UITransform)?.setContentSize(w, h);
     }
 
     protected onDestroy(): void {

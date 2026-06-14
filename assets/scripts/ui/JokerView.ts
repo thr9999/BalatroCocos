@@ -1,6 +1,7 @@
-import { _decorator, Component, Label, Node, Rect, Size, Sprite, SpriteFrame, Tween, tween, Vec2, Vec3 } from 'cc';
+import { _decorator, Component, Label, Node, Rect, Size, Sprite, SpriteFrame, Tween, tween, UITransform, Vec2, Vec3 } from 'cc';
 import type { JokerDef } from '../core/JokerEffect';
 import { getJokerArtCell } from './JokerArt';
+import { ResponsiveRoot } from './ResponsiveRoot';
 
 const { ccclass, property } = _decorator;
 
@@ -33,6 +34,12 @@ export class JokerView extends Component {
     @property({ type: Label, tooltip: '价格（仅商店里用，桌面持有的小丑牌会自动隐藏）' })
     public priceLabel: Label | null = null;
 
+    @property({ tooltip: '小丑牌宽（tile，× 基础单位 = 像素）' })
+    public widthTiles = 2;
+
+    @property({ tooltip: '小丑牌高（tile）' })
+    public heightTiles = 2.75;
+
     public def: JokerDef | null = null;
 
     private basePosition = new Vec3();
@@ -49,6 +56,7 @@ export class JokerView extends Component {
         this.def = def;
         this.clickHandler = onClick ?? null;
 
+        this.applyDisplaySize();
         this.applyArt(def.id);
 
         if (this.nameLabel) {
@@ -76,6 +84,18 @@ export class JokerView extends Component {
             this.priceLabel.node.active = true;
             this.priceLabel.string = `$${cost}`;
         }
+    }
+
+    /** 小丑牌显示尺寸 = 本组件的 tile 宽高 × 基础单位（和扑克牌同尺寸）。 */
+    private applyDisplaySize(): void {
+        const unit = ResponsiveRoot.current?.unit ?? ResponsiveRoot.DEFAULT_UNIT;
+        const w = this.widthTiles * unit;
+        const h = this.heightTiles * unit;
+        if (this.frameSprite) {
+            this.frameSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+            this.frameSprite.getComponent(UITransform)?.setContentSize(w, h);
+        }
+        this.getComponent(UITransform)?.setContentSize(w, h);
     }
 
     /** 从图集切出该 joker 对应的格子贴到 frameSprite 上。没配图集就保持占位色块。 */

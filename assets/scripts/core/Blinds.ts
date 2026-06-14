@@ -9,9 +9,9 @@ export type BlindDef = {
 };
 
 export const BLINDS: BlindDef[] = [
-    { id: 'small', name: '小盲注', scoreMult: 1, reward: 3 },
-    { id: 'big', name: '大盲注', scoreMult: 1.5, reward: 4 },
-    { id: 'boss', name: 'Boss盲注', scoreMult: 2, reward: 5 },
+    { id: 'small', name: 'Small Blind', scoreMult: 1, reward: 3 },
+    { id: 'big', name: 'Big Blind', scoreMult: 1.5, reward: 4 },
+    { id: 'boss', name: 'Boss Blind', scoreMult: 2, reward: 5 },
 ];
 
 // 原作白注难度的底注基础分曲线，下标即 ante（0 为练习关，正式从 1 开始）

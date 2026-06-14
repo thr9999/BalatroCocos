@@ -24,6 +24,7 @@ import type { RewardBreakdown } from '../core/Economy';
 import { CardView } from './CardView';
 import { JokerRow } from './JokerRow';
 import { ShopView } from './ShopView';
+import { ResponsiveRoot } from './ResponsiveRoot';
 
 const { ccclass, property } = _decorator;
 
@@ -47,14 +48,19 @@ export class HandDemo extends Component {
     @property({ type: Prefab })
     public cardPrefab: Prefab | null = null;
 
-    @property
-    public startX = -360;
+    @property({ tooltip: '手牌相邻卡的中心距（tile，比卡宽小则重叠）' })
+    public handSpacingTiles = 1.5;
 
-    @property
-    public spacingX = 120;
+    @property({ tooltip: '出牌区相邻卡的中心距（tile）' })
+    public playSpacingTiles = 2;
 
-    @property
-    public cardY = 0;
+    @property({ tooltip: '手牌区→出牌区的垂直距离（tile，出牌动画目标高度）' })
+    public playOffsetTiles = 3.5;
+
+    // 下面是换算出的像素值，由 applyLayout() 用上面的 tile × 基础单位算出，不在 inspector 暴露
+    private startX = -360;
+    private spacingX = 120;
+    private cardY = 0;
 
     @property
     public handSize = 8;
@@ -86,11 +92,8 @@ export class HandDemo extends Component {
     @property({ type: Label, tooltip: 'HUD 金币显示' })
     public moneyLabel: Label | null = null;
 
-    @property
-    public playY = 220;
-
-    @property
-    public playSpacingX = 104;
+    private playY = 220;
+    private playSpacingX = 104;
 
     @property({ type: Label })
     public handTypeLabel: Label | null = null;
@@ -118,6 +121,9 @@ export class HandDemo extends Component {
 
     @property({ type: Label })
     public scoreLabel: Label | null = null;
+
+    @property({ type: Label })
+    public anteLabel: Label | null = null;
 
     @property({ type: Node })
     public resultPanel: Node | null = null;
@@ -163,8 +169,19 @@ export class HandDemo extends Component {
     private acceptingInput = false;
 
     protected start(): void {
+        this.applyLayout();
         this.setupButtons();
         this.startRun();
+    }
+
+    /** 用本组件的 tile 间距 × 当前基础单位，算出手牌/出牌的像素布局。 */
+    private applyLayout(): void {
+        const unit = ResponsiveRoot.current?.unit ?? ResponsiveRoot.DEFAULT_UNIT;
+        this.cardY = 0;
+        this.spacingX = this.handSpacingTiles * unit;
+        this.playSpacingX = this.playSpacingTiles * unit;
+        this.startX = -((this.handSize - 1) * this.spacingX) / 2;
+        this.playY = this.playOffsetTiles * unit;
     }
 
     /** 开新的一局：重置金币/小丑牌/底注，再开第一回合。 */
@@ -472,14 +489,14 @@ export class HandDemo extends Component {
     private updateHandText(score: ScoreDisplay | null): void {
         if (!score) {
             this.setLabel(this.handTypeLabel, '');
-            this.setLabel(this.chipsLabel, 'Chips 0');
-            this.setLabel(this.multLabel, 'Mult 0');
-            this.setLabel(this.totalLabel, 'Total 0');
+            this.setLabel(this.chipsLabel, '0');
+            this.setLabel(this.multLabel, '0');
+            this.setLabel(this.totalLabel, '0');
         } else {
-            this.setLabel(this.handTypeLabel, `${score.displayName} / ${score.name}`);
-            this.setLabel(this.chipsLabel, `Chips ${score.chips}`);
-            this.setLabel(this.multLabel, `Mult ${score.mult}`);
-            this.setLabel(this.totalLabel, `Total ${score.total}`);
+            this.setLabel(this.handTypeLabel, score.name);
+            this.setLabel(this.chipsLabel, `${score.chips}`);
+            this.setLabel(this.multLabel, `${score.mult}`);
+            this.setLabel(this.totalLabel, `${score.total}`);
         }
 
         this.refreshActionButtons();
@@ -491,11 +508,13 @@ export class HandDemo extends Component {
         }
 
         const blind = BLINDS[this.run.blindIndex];
-        this.setLabel(this.blindLabel, `底注 ${this.run.ante} · ${blind.name}`);
-        this.setLabel(this.targetLabel, `目标 ${this.engine.targetScore}`);
-        this.setLabel(this.scoreLabel, `得分 ${this.engine.roundScore}`);
-        this.setLabel(this.discardsLabel, `Discards ${this.engine.discardsLeft}`);
-        this.setLabel(this.handsLabel, `Hands ${this.engine.handsLeft}`);
+        // 只填"值"，标题(Score at least / Hands / Ante 等)是格子里手写的静态英文 Label
+        this.setLabel(this.blindLabel, blind.name);
+        this.setLabel(this.targetLabel, `${this.engine.targetScore}`);
+        this.setLabel(this.scoreLabel, `${this.engine.roundScore}`);
+        this.setLabel(this.discardsLabel, `${this.engine.discardsLeft}`);
+        this.setLabel(this.handsLabel, `${this.engine.handsLeft}`);
+        this.setLabel(this.anteLabel, `${this.run.ante}`);
         this.updateMoney();
     }
 
