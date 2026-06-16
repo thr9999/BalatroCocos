@@ -21,6 +21,11 @@ export enum ColorName {
     Purple, // 8867A5  原版 PURPLE
     White, // FFFFFF
     None, // 不填充/不描边
+    HudMain, // 343F41  原版非 Boss HUD 的 BOSS_MAIN：darken(BLACK, 0.05)
+    HudDark, // 454F51  原版非 Boss HUD 的 BOSS_DARK：lighten(BLACK, 0.07)
+    BlindSmallMain, // 1679B4  原版 Small Blind 的 DYN_UI.MAIN
+    BlindSmallDark, // 2A5871  原版 Small Blind 的 DYN_UI.DARK
+    HandTextDark, // 323B3D  原版 hand_text_area：darken(BLACK, 0.1)
 }
 Enum(ColorName);
 
@@ -36,11 +41,19 @@ export const COLOR_HEX: Record<ColorName, string> = {
     [ColorName.Purple]: '8867A5',
     [ColorName.White]: 'FFFFFF',
     [ColorName.None]: '000000',
+    [ColorName.HudMain]: '343F41',
+    [ColorName.HudDark]: '454F51',
+    [ColorName.BlindSmallMain]: '1679B4',
+    [ColorName.BlindSmallDark]: '2A5871',
+    [ColorName.HandTextDark]: '323B3D',
 };
 
 /**
  * 用途约定(色卡的语义用法,仅作参考,挑色卡时按这个对照)：
  *   面板/背景/格子 = Black     描边 = LBlack
+ *   原版 HUD 主体 = HudMain/HudDark
+ *   Small Blind 当前盲注块 = BlindSmallMain/BlindSmallDark
+ *   手牌计分底 = HandTextDark
  *   筹码 = Blue                倍率 = Red
  *   金币 = Gold                底注/回合 = Orange
  *   文字 = White
